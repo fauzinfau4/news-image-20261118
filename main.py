@@ -1,26 +1,34 @@
 #!/usr/bin/env python3
-"""news-image-20261118 entry: copy the baked-in image to the output dir.
+"""Copy the baked-in news poster to the grader's output location.
 
-The image (entry.png, drawn by draw.py) sums up the world news of
-Wednesday 18 November 2026. Copying fixed bytes keeps both graded runs
-byte-identical with no network access. Standard library only.
+The poster (entry.png) was rendered at build time by draw.py. This
+entrypoint only copies bytes, so both graded runs write identical
+output with no network, no clock and no third-party packages.
 """
-import os
-import shutil
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+from os import environ
+from pathlib import Path
+
+SOURCE_NAME = "entry.png"
+DEFAULT_OUTPUT = Path("/output") / SOURCE_NAME
 
 
-def main():
-    out_dir = os.environ.get("MAKEFUN_OUTPUT_DIR", "/output/entry.png")
-    # MAKEFUN_OUTPUT_DIR is a directory in the grader; tolerate a file path.
-    if out_dir.endswith(".png"):
-        dest = out_dir
-        os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
-    else:
-        os.makedirs(out_dir, exist_ok=True)
-        dest = os.path.join(out_dir, "entry.png")
-    shutil.copyfile(os.path.join(HERE, "entry.png"), dest)
+def resolve_destination() -> Path:
+    raw = environ.get("MAKEFUN_OUTPUT_DIR", "")
+    if not raw:
+        return DEFAULT_OUTPUT
+    target = Path(raw)
+    if target.suffix == ".png":
+        return target
+    return target / SOURCE_NAME
+
+
+def main() -> None:
+    here = Path(__file__).resolve().parent
+    source = here / SOURCE_NAME
+    destination = resolve_destination()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(source.read_bytes())
 
 
 if __name__ == "__main__":

@@ -1,335 +1,303 @@
-#!/usr/bin/env python3
-"""Draw the 18 November 2026 world-news summary image (1024x1024 PNG).
+"""Render a one-page news poster: six stories from 18 November 2026.
 
-The final image is baked into entry.png; main.py only copies it so the
-graded program is deterministic and needs no network access.
-All text is rendered here with PIL + DejaVu (no AI-generated text).
-All illustrations are flat vector shapes drawn with PIL primitives.
-Layout: dark masthead, six cards in a 2x3 grid, each with a left
-illustration tile, a coloured side bar, a tag, a headline and a short body.
+Everything here is drawn with Pillow primitives -- no downloaded assets,
+no network access, no timestamps. The same input always produces the
+same PNG bytes, because every coordinate, colour and string is fixed.
 """
-import math
+
+from __future__ import annotations
+
 import os
+from dataclasses import dataclass, field
+
 from PIL import Image, ImageDraw, ImageFont
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-FONT_DIR = "/usr/share/fonts/truetype/dejavu"
-F_BOLD = os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf")
-F_REG = os.path.join(FONT_DIR, "DejaVuSans.ttf")
+CANVAS_W = 1024
+CANVAS_H = 1024
 
-W = H = 1024
-
-# Palette
-SLATE = (16, 26, 34)
-SLATE_LT = (34, 48, 62)
-RED = (178, 44, 36)
-GOLD = (198, 140, 44)
-PAPER = (247, 245, 238)
-INK = (22, 24, 26)
-BODY = (56, 56, 54)
-MUTED = (112, 108, 98)
+PAPER = (244, 239, 230)
+INK = (16, 28, 46)
+GOLD = (212, 160, 60)
 CARD = (255, 255, 255)
-BORDER = (218, 212, 198)
+CARD_EDGE = (205, 196, 180)
+MUTED = (110, 105, 95)
+
+FONT_DIR = "/usr/share/fonts/truetype/dejavu"
 
 
-def font(path, size):
-    return ImageFont.truetype(path, size)
+@dataclass
+class Story:
+    """One news item: its label, headline, short summary and palette."""
+
+    tag: str
+    headline: str
+    summary: str
+    accent: tuple
+    panel: tuple
+    painter: str
 
 
-def wrap(draw, text, fnt, max_w):
-    """Greedy word wrap; returns list of lines that fit max_w."""
-    words = text.split()
-    lines, cur = [], ""
-    for w in words:
-        trial = (cur + " " + w).strip()
-        if draw.textlength(trial, font=fnt) <= max_w:
-            cur = trial
-        else:
-            if cur:
-                lines.append(cur)
-            cur = w
-    if cur:
-        lines.append(cur)
-    return lines
+@dataclass
+class Poster:
+    """Holds the canvas plus the typefaces and paints the whole page."""
+
+    stories: list = field(default_factory=list)
+    sheet: Image.Image = None
+    pen: ImageDraw.ImageDraw = None
+
+    def __post_init__(self):
+        self.sheet = Image.new("RGB", (CANVAS_W, CANVAS_H), PAPER)
+        self.pen = ImageDraw.Draw(self.sheet)
+
+    # -- type helpers -------------------------------------------------
+    def face(self, name, size):
+        return ImageFont.truetype(os.path.join(FONT_DIR, name), size)
+
+    def split_lines(self, text, font, width):
+        """Greedy word wrap measured with the real font."""
+        words = text.split()
+        lines, current = [], ""
+        for word in words:
+            trial = f"{current} {word}".strip()
+            if self.pen.textlength(trial, font=font) <= width:
+                current = trial
+            else:
+                if current:
+                    lines.append(current)
+                current = word
+        if current:
+            lines.append(current)
+        return lines
+
+    def block(self, lines, font, x, y, fill, leading):
+        for line in lines:
+            self.pen.text((x, y), line, font=font, fill=fill)
+            y += leading
+        return y
+
+    # -- page furniture ----------------------------------------------
+    def masthead(self):
+        self.pen.rectangle([0, 0, CANVAS_W, 112], fill=INK)
+        date_font = self.face("DejaVuSerif-Bold.ttf", 44)
+        date = "WEDNESDAY 18 NOVEMBER 2026"
+        tw = self.pen.textlength(date, font=date_font)
+        self.pen.text(((CANVAS_W - tw) / 2, 16), date, font=date_font, fill=(250, 248, 242))
+        sub_font = self.face("DejaVuSans-Bold.ttf", 17)
+        sub = "S I X   S T O R I E S   ·   O N E   P A G E"
+        sw = self.pen.textlength(sub, font=sub_font)
+        self.pen.text(((CANVAS_W - sw) / 2, 72), sub, font=sub_font, fill=GOLD)
+        self.pen.rectangle([0, 112, CANVAS_W, 116], fill=(178, 52, 44))
+
+    def footer(self):
+        font = self.face("DejaVuSans.ttf", 15)
+        note = "Sources: Reuters · AP · AFP · Al Jazeera · US Dept. of Justice  —  18 November 2026"
+        nw = self.pen.textlength(note, font=font)
+        self.pen.text(((CANVAS_W - nw) / 2, 988), note, font=font, fill=MUTED)
+
+    # -- one story card ----------------------------------------------
+    def card(self, story, cx, cy, cw, ch):
+        self.pen.rounded_rectangle([cx, cy, cx + cw, cy + ch], radius=10,
+                                   fill=CARD, outline=CARD_EDGE, width=2)
+        self.pen.rectangle([cx, cy + 8, cx + 7, cy + ch - 8], fill=story.accent)
+        px, py, pw, ph = cx + 14, cy + 14, 168, ch - 28
+        getattr(self, story.painter)(px, py, pw, ph)
+        tx = cx + 196
+        tw = cw - 196 - 14
+        tag_font = self.face("DejaVuSans-Bold.ttf", 14)
+        self.pen.text((tx, cy + 16), story.tag, font=tag_font, fill=story.accent)
+        head_font = self.face("DejaVuSans-Bold.ttf", 25)
+        y = self.block(self.split_lines(story.headline, head_font, tw),
+                       head_font, tx, cy + 40, INK, 30)
+        body_font = self.face("DejaVuSans.ttf", 15)
+        self.block(self.split_lines(story.summary, body_font, tw),
+                   body_font, tx, y + 8, (52, 52, 48), 20)
+
+    # -- illustration panels -----------------------------------------
+    def paint_chip(self, x, y, w, h):
+        self.pen.rounded_rectangle([x, y, x + w, y + h], radius=8, fill=(18, 62, 52))
+        cx, cy = x + w // 2, y + h // 2 + 8
+        for ex, ey in [(x + 12, y + 22), (x + w - 12, y + 22),
+                       (x + 12, y + h - 22), (x + w - 12, y + h - 22),
+                       (x + w // 2, y + 12), (x + w // 2, y + h - 12),
+                       (x + 12, cy), (x + w - 12, cy)]:
+            self.pen.line([ex, ey, cx, cy], fill=(212, 160, 60), width=3)
+            self.pen.ellipse([ex - 5, ey - 5, ex + 5, ey + 5], fill=(212, 160, 60))
+        self.pen.rectangle([cx - 42, cy - 42, cx + 42, cy + 42], fill=(46, 160, 90))
+        self.pen.rectangle([cx - 28, cy - 28, cx + 28, cy + 28], fill=(24, 96, 58))
+        self.pen.rectangle([cx - 14, cy - 14, cx + 14, cy + 14], fill=(46, 160, 90))
+        self.pen.line([(cx - 22, cy + 16), (cx - 4, cy - 2), (cx + 4, cy + 4),
+                       (cx + 24, cy - 22)], fill=(255, 255, 255), width=4)
+        self.pen.polygon([(cx + 24, cy - 22), (cx + 24, cy - 10), (cx + 12, cy - 22)],
+                         fill=(255, 255, 255))
+
+    def paint_virus(self, x, y, w, h):
+        self.pen.rounded_rectangle([x, y, x + w, y + h], radius=8, fill=(247, 226, 224))
+        self._bug(x + w // 2, y + 82, 52, (198, 52, 44))
+        self._bug(x + 42, y + h - 62, 30, (214, 96, 82))
+        self._bug(x + w - 42, y + h - 58, 26, (214, 96, 82))
+        self.pen.rounded_rectangle([x + w // 2 - 26, y + h - 46, x + w // 2 + 26, y + h - 12],
+                                   radius=6, fill=(255, 255, 255), outline=(198, 52, 44), width=3)
+        self.pen.rectangle([x + w // 2 - 4, y + h - 40, x + w // 2 + 4, y + h - 18],
+                           fill=(198, 52, 44))
+        self.pen.rectangle([x + w // 2 - 12, y + h - 32, x + w // 2 + 12, y + h - 26],
+                           fill=(198, 52, 44))
+
+    def _bug(self, cx, cy, r, colour):
+        import math
+        for k in range(10):
+            ang = k * math.pi / 5
+            ex, ey = cx + int((r + 12) * math.cos(ang)), cy + int((r + 12) * math.sin(ang))
+            self.pen.line([cx, cy, ex, ey], fill=colour, width=4)
+            self.pen.ellipse([ex - 5, ey - 5, ex + 5, ey + 5], fill=colour)
+        self.pen.ellipse([cx - r, cy - r, cx + r, cy + r], fill=colour)
+        self.pen.ellipse([cx - r // 3, cy - r // 3, cx + r // 5, cy + r // 5],
+                         fill=(255, 255, 255))
+
+    def paint_crash(self, x, y, w, h):
+        self.pen.rounded_rectangle([x, y, x + w, y + h], radius=8, fill=(196, 205, 214))
+        self.pen.ellipse([x + w - 52, y + 14, x + w - 16, y + 50], fill=(240, 236, 220))
+        self.pen.polygon([(x, y + 150), (x + 60, y + 96), (x + 120, y + 150)],
+                         fill=(150, 158, 168))
+        self.pen.polygon([(x + 70, y + 150), (x + 130, y + 104), (x + w, y + 150)],
+                         fill=(128, 138, 150))
+        self.pen.rectangle([x, y + 150, x + w, y + h], fill=(38, 92, 58))
+        for tx in range(x + 8, x + w - 8, 18):
+            self.pen.polygon([(tx, y + h), (tx + 8, y + h - 26), (tx + 16, y + h)],
+                             fill=(26, 66, 42))
+        self.pen.polygon([(x + 28, y + 84), (x + 96, y + 118), (x + 92, y + 128),
+                          (x + 34, y + 96)], fill=(32, 34, 38))
+        self.pen.polygon([(x + 96, y + 118), (x + 132, y + 128), (x + 128, y + 136),
+                          (x + 94, y + 128)], fill=(32, 34, 38))
+        for sx, sy, sr in [(x + 52, y + 78, 13), (x + 68, y + 62, 16), (x + 88, y + 48, 12)]:
+            self.pen.ellipse([sx - sr, sy - sr, sx + sr, sy + sr], fill=(96, 96, 96))
+        self.pen.polygon([(x + w // 2 - 18, y + h), (x + w // 2, y + h - 42),
+                          (x + w // 2 + 18, y + h)], fill=(232, 120, 32))
+        self.pen.polygon([(x + w // 2 - 9, y + h), (x + w // 2, y + h - 22),
+                          (x + w // 2 + 9, y + h)], fill=(245, 196, 66))
+
+    def paint_parliament(self, x, y, w, h):
+        self.pen.rounded_rectangle([x, y, x + w, y + h], radius=8, fill=(214, 230, 244))
+        self.pen.ellipse([x + 16, y + 16, x + 48, y + 48], fill=(245, 214, 130))
+        self.pen.rectangle([x + w - 26, y + 26, x + w - 23, y + 96], fill=(60, 60, 60))
+        self.pen.polygon([(x + w - 26, y + 26), (x + w - 62, y + 36), (x + w - 26, y + 46)],
+                         fill=(255, 255, 255))
+        self.pen.rectangle([x + w - 62, y + 36, x + w - 26, y + 41], fill=(38, 84, 160))
+        self.pen.rectangle([x + w - 62, y + 41, x + w - 26, y + 46], fill=(255, 255, 255))
+        bx, bw = x + 22, w - 44
+        self.pen.ellipse([x + w // 2 - 20, y + 62, x + w // 2 + 20, y + 100], fill=(214, 186, 138))
+        self.pen.polygon([(bx, y + 108), (x + w // 2, y + 84), (bx + bw, y + 108)],
+                         fill=(198, 170, 122))
+        self.pen.rectangle([bx, y + 108, bx + bw, y + 196], fill=(232, 220, 196))
+        for i in range(4):
+            colx = bx + 12 + i * ((bw - 24) // 3)
+            self.pen.rectangle([colx, y + 118, colx + 12, y + 186], fill=(196, 180, 146))
+        self.pen.rectangle([bx - 6, y + 196, bx + bw + 6, y + 206], fill=(160, 140, 104))
+        self.pen.rectangle([bx - 6, y + 206, bx + bw + 6, y + 214], fill=(120, 100, 70))
+        self.pen.rounded_rectangle([x + 16, y + h - 26, x + 64, y + h - 2], radius=4,
+                                   fill=(38, 84, 160))
+        self.pen.line([(x + 26, y + h - 14), (x + 36, y + h - 22), (x + 52, y + h - 8)],
+                      fill=(255, 255, 255), width=4)
+
+    def paint_dossier(self, x, y, w, h):
+        self.pen.rounded_rectangle([x, y, x + w, y + h], radius=8, fill=(20, 34, 58))
+        for dx, dy in [(x + 14, y + 16), (x + w - 20, y + 20), (x + 18, y + h - 22)]:
+            self.pen.ellipse([dx, dy, dx + 6, dy + 6], fill=(200, 210, 220))
+        self.pen.rectangle([x + 34, y + 26, x + w - 34, y + 158], fill=(238, 236, 228))
+        for i, ly in enumerate(range(y + 44, y + 120, 14)):
+            self.pen.rectangle([x + 46, ly, x + w - 46, ly + 5], fill=(150, 148, 140))
+        self.pen.rectangle([x + 46, y + 128, x + w - 84, y + 138], fill=(178, 52, 44))
+        self.pen.ellipse([x + w - 78, y + 122, x + w - 46, y + 154],
+                         outline=(178, 52, 44), width=3)
+        self.pen.ellipse([x + 78, y + 128, x + 130, y + 180],
+                         outline=(212, 160, 60), width=6)
+        self.pen.line([(x + 122, y + 172), (x + 148, y + 200)], fill=(212, 160, 60), width=7)
+        for fx, flag in [(x + 22, "us"), (x + w - 62, "uk")]:
+            self.pen.rectangle([fx, y + h - 34, fx + 40, y + h - 12],
+                               outline=(255, 255, 255), width=2)
+            if flag == "us":
+                for s in range(4):
+                    self.pen.rectangle([fx, y + h - 34 + s * 5, fx + 40, y + h - 32 + s * 5],
+                                       fill=(178, 52, 44) if s % 2 == 0 else (255, 255, 255))
+                self.pen.rectangle([fx, y + h - 34, fx + 16, y + h - 24], fill=(38, 84, 160))
+            else:
+                self.pen.rectangle([fx, y + h - 34, fx + 40, y + h - 12], fill=(38, 84, 160))
+                self.pen.line([(fx, y + h - 34), (fx + 40, y + h - 12)], fill=(255, 255, 255), width=3)
+                self.pen.line([(fx + 40, y + h - 34), (fx, y + h - 12)], fill=(255, 255, 255), width=3)
+
+    def paint_courtroom(self, x, y, w, h):
+        self.pen.rounded_rectangle([x, y, x + w, y + h], radius=8, fill=(226, 226, 222))
+        self.pen.polygon([(x + 14, y + 78), (x + w // 2, y + 34), (x + w - 14, y + 78)],
+                         fill=(168, 168, 160))
+        self.pen.ellipse([x + w // 2 - 9, y + 52, x + w // 2 + 9, y + 70], fill=(212, 160, 60))
+        self.pen.rectangle([x + 22, y + 78, x + w - 22, y + 190], fill=(250, 250, 246))
+        for i in range(3):
+            colx = x + 34 + i * 44
+            self.pen.rectangle([colx, y + 90, colx + 16, y + 178], fill=(150, 150, 146))
+        self.pen.rectangle([x + 16, y + 190, x + w - 16, y + 200], fill=(120, 118, 112))
+        self.pen.rectangle([x + 16, y + 200, x + w - 16, y + 208], fill=(96, 94, 90))
+        self.pen.rectangle([x + 30, y + 214, x + 96, y + 228], fill=(122, 82, 46))
+        self.pen.rectangle([x + 96, y + 220, x + 150, y + 228], fill=(92, 60, 32))
+        self.pen.rectangle([x + w - 62, y + 214, x + w - 22, y + 228], fill=(122, 82, 46))
+
+    # -- assemble ------------------------------------------------------
+    def compose(self):
+        self.masthead()
+        left, top = 20, 126
+        cw = (CANVAS_W - 2 * left - 16) // 2
+        ch = 271
+        for idx, story in enumerate(self.stories):
+            row, col = divmod(idx, 2)
+            self.card(story, left + col * (cw + 16), top + row * (ch + 16), cw, ch)
+        self.footer()
+        return self.sheet
 
 
-# ---------------------------------------------------------------- scenes
-# Each scene draws into a 150x240 portrait tile (flat vector style).
-
-def scene_chip(d):
-    # dark teal board, gold circuit traces, green chip, rising arrow
-    d.rectangle([0, 0, 150, 240], fill=(12, 44, 40))
-    for x0, y0, x1, y1 in ((14, 56, 52, 56), (98, 56, 136, 56),
-                           (14, 184, 52, 184), (98, 184, 136, 184),
-                           (52, 14, 52, 56), (98, 14, 98, 56),
-                           (52, 184, 52, 226), (98, 184, 98, 226)):
-        d.line([x0, y0, x1, y1], fill=GOLD, width=3)
-    for cx, cy in ((14, 56), (136, 56), (14, 184), (136, 184),
-                   (52, 14), (98, 14), (52, 226), (98, 226)):
-        d.ellipse([cx - 6, cy - 6, cx + 6, cy + 6], fill=GOLD)
-    # chip body
-    d.rectangle([40, 70, 110, 170], fill=(96, 168, 0))
-    d.rectangle([40, 70, 110, 170], outline=(48, 96, 0), width=4)
-    for i in range(5):
-        d.rectangle([46 + i * 12, 62, 54 + i * 12, 70], fill=(210, 210, 210))
-        d.rectangle([46 + i * 12, 170, 54 + i * 12, 178], fill=(210, 210, 210))
-        d.rectangle([32, 78 + i * 12, 40, 86 + i * 12], fill=(210, 210, 210))
-        d.rectangle([110, 78 + i * 12, 118, 86 + i * 12], fill=(210, 210, 210))
-    d.rectangle([60, 96, 90, 144], fill=(24, 64, 10))
-    d.rectangle([66, 104, 84, 124], fill=(96, 168, 0))
-    # rising arrow across the chip
-    d.line([46, 138, 66, 118, 78, 128, 104, 100], fill=(255, 255, 255), width=5)
-    d.polygon([(104, 100), (92, 102), (102, 112)], fill=(255, 255, 255))
-
-
-def scene_virus(d):
-    # pale rose background, spiky red virus spheres
-    d.rectangle([0, 0, 150, 240], fill=(246, 226, 224))
-    d.ellipse([8, 196, 142, 240], fill=(228, 196, 192))  # ground hint
-
-    def virus(cx, cy, r, col):
-        for i in range(12):
-            a = math.radians(i * 30)
-            x1 = cx + int((r - 2) * math.cos(a))
-            y1 = cy + int((r - 2) * math.sin(a))
-            x2 = cx + int((r + 12) * math.cos(a))
-            y2 = cy + int((r + 12) * math.sin(a))
-            d.line([x1, y1, x2, y2], fill=col, width=4)
-            d.ellipse([x2 - 4, y2 - 4, x2 + 4, y2 + 4], fill=col)
-        d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=col)
-        d.ellipse([cx - r + 8, cy - r + 8, cx - r + 22, cy - r + 22],
-                  fill=(255, 255, 255))
-
-    virus(75, 92, 42, (178, 44, 36))
-    virus(30, 178, 22, (200, 90, 80))
-    virus(122, 182, 18, (200, 90, 80))
-    # small shield with cross (vaccination)
-    d.polygon([(75, 196), (108, 208), (108, 224), (75, 240), (42, 224),
-               (42, 208)], fill=(255, 255, 255))
-    d.polygon([(75, 196), (108, 208), (108, 224), (75, 240), (42, 224),
-               (42, 208)], outline=(178, 44, 36), width=3)
-    d.rectangle([71, 210, 79, 232], fill=(178, 44, 36))
-    d.rectangle([63, 217, 87, 225], fill=(178, 44, 36))
+def build_poster():
+    items = [
+        Story("TECHNOLOGY · UNITED STATES",
+              "NVIDIA'S RECORD QUARTER, WITHOUT HUANG",
+              "Revenue more than doubled to $115.8bn, profit hit $65.3bn, "
+              "and $130bn is guided next. Huang said he would return if asked "
+              "\u2014 the board says no. CFO Colette Kress leads for now.",
+              (24, 110, 78), (18, 62, 52), "paint_chip"),
+        Story("HEALTH · AMERICAS",
+              "AMERICA LOSES ITS MEASLES-FREE LABEL",
+              "After 26 years, PAHO says measles is spreading in the US "
+              "without a break. Over 5,400 cases in 2026 \u2014 the worst in "
+              "30+ years. Mexico and Bolivia lost the status too.",
+              (178, 52, 44), (247, 226, 224), "paint_virus"),
+        Story("DISASTER · RUSSIA",
+              "19 DEAD AS ARMY PLANE CRASHES IN SIBERIA",
+              "An An-12 transport came down near Kemerovo, killing all 19 "
+              "aboard. The ministry blames a suspected technical fault. "
+              "Some reports put the toll at 17.",
+              (90, 96, 104), (196, 205, 214), "paint_crash"),
+        Story("POLITICS · ISRAEL",
+              "EISENKOT ALLY TAKES THE KNESSET CHAIR",
+              "Matan Kahana beat Likud's Ofir Katz 66\u201352 to become "
+              "speaker, ousting Amir Ohana. The win hands Eisenkot's bloc "
+              "control of parliament's agenda.",
+              (38, 84, 160), (214, 230, 244), "paint_parliament"),
+        Story("ESPIONAGE · BRITAIN / USA",
+              "SPY-SUSPECT OFFICER NOW IN US HANDS",
+              "Lt Col Brandon Tyner, 41, was arrested near Gloucester on "
+              "10 Nov on suspicion of spying for Russia. Britain has now "
+              "passed him to US military custody.",
+              (30, 58, 110), (20, 34, 58), "paint_dossier"),
+        Story("COURTS · UNITED STATES",
+              "27\u00bd YEARS FOR TRUMP MURDER PLOT",
+              "Asif Merchant, 48, was jailed in Brooklyn for 330 months over "
+              "an Iran-linked murder-for-hire scheme aimed at Donald Trump. "
+              "Prosecutors had asked for life.",
+              (122, 82, 46), (226, 226, 222), "paint_courtroom"),
+    ]
+    return Poster(stories=items).compose()
 
 
-def scene_plane(d):
-    # grey sky, snowy Siberian hills, plane nose-down with smoke,
-    # flames where it hit the ground
-    d.rectangle([0, 0, 150, 240], fill=(168, 178, 186))
-    d.ellipse([112, 16, 142, 46], fill=(240, 240, 235))  # pale sun
-    # snowy hills
-    d.polygon([(0, 150), (50, 96), (100, 150)], fill=(226, 232, 236))
-    d.polygon([(60, 150), (120, 92), (150, 130), (150, 150)],
-              fill=(206, 214, 220))
-    # taiga band
-    d.rectangle([0, 150, 150, 240], fill=(38, 74, 52))
-    for x in range(6, 150, 18):
-        d.polygon([(x, 186), (x + 8, 158), (x + 16, 186)],
-                  fill=(24, 56, 38))
-    d.rectangle([0, 186, 150, 240], fill=(52, 88, 62))
-    # smoke trail from the plane
-    for cx, cy, r in ((52, 58, 11), (66, 70, 13), (80, 82, 15), (94, 94, 13)):
-        d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(88, 88, 90))
-    # plane silhouette, nose-down to the right
-    d.polygon([(40, 96), (96, 122), (100, 130), (46, 106)],
-              fill=(28, 30, 34))  # fuselage
-    d.polygon([(66, 108), (58, 130), (76, 116)], fill=(28, 30, 34))  # wing
-    d.polygon([(40, 96), (30, 88), (44, 104)], fill=(28, 30, 34))  # tail
-    d.polygon([(96, 122), (108, 120), (100, 130)], fill=(28, 30, 34))  # nose
-    # flames at the crash point on the ground
-    cx, cy = 112, 196
-    d.polygon([(cx - 26, cy + 16), (cx - 16, cy - 18), (cx - 6, cy + 2),
-               (cx + 2, cy - 26), (cx + 12, cy - 2), (cx + 22, cy - 16),
-               (cx + 26, cy + 16)], fill=(255, 140, 0))
-    d.polygon([(cx - 12, cy + 16), (cx - 6, cy - 6), (cx + 2, cy + 6),
-               (cx + 8, cy - 10), (cx + 14, cy + 16)], fill=(255, 210, 60))
-    # smoke rising from the fire
-    for sx, sy, r in ((112, 158, 10), (120, 142, 12), (108, 128, 9)):
-        d.ellipse([sx - r, sy - r, sx + r, sy + r], fill=(96, 96, 98))
-
-
-def scene_knesset(d):
-    # sandstone parliament: dome, columns, steps + ballot box
-    d.rectangle([0, 0, 150, 240], fill=(214, 228, 240))
-    d.ellipse([18, 14, 52, 48], fill=(255, 236, 190))  # sun
-    # building
-    d.rectangle([16, 108, 134, 196], fill=(238, 226, 200))
-    d.polygon([(8, 108), (75, 66), (142, 108)], fill=(214, 198, 164))
-    d.ellipse([58, 48, 92, 82], fill=(198, 178, 138))  # dome
-    d.rectangle([72, 34, 78, 52], fill=(198, 178, 138))
-    for x in (26, 52, 78, 104):
-        d.rectangle([x, 116, x + 12, 186], fill=(250, 240, 214))
-    d.rectangle([10, 196, 140, 204], fill=(190, 172, 136))
-    d.rectangle([6, 204, 144, 212], fill=(176, 158, 122))
-    # flag: blue-white with star
-    d.rectangle([118, 30, 121, 108], fill=(90, 80, 70))
-    d.rectangle([121, 34, 146, 58], fill=(255, 255, 255))
-    d.rectangle([121, 34, 146, 40], fill=(30, 80, 170))
-    d.rectangle([121, 52, 146, 58], fill=(30, 80, 170))
-    # ballot box with tick
-    d.rectangle([20, 218, 62, 238], fill=(30, 80, 170))
-    d.rectangle([14, 212, 68, 218], fill=(24, 64, 140))
-    d.line([28, 228, 38, 236, 56, 220], fill=(255, 255, 255), width=5)
-
-
-def scene_spy(d):
-    # dark navy: magnifier over a file, two small flags
-    d.rectangle([0, 0, 150, 240], fill=(20, 34, 56))
-    for x, y in ((18, 24), (132, 40), (120, 200), (24, 210), (140, 120)):
-        d.ellipse([x, y, x + 4, y + 4], fill=(200, 200, 200))
-    # file
-    d.rectangle([28, 52, 122, 150], fill=(240, 238, 230))
-    d.rectangle([28, 52, 122, 150], outline=(160, 156, 146), width=2)
-    for yy in (66, 80, 94, 108):
-        d.line([38, yy, 112, yy], fill=(120, 118, 110), width=3)
-    d.rectangle([38, 122, 78, 134], fill=(178, 44, 36))
-    # red stamp circle
-    d.ellipse([92, 118, 116, 142], outline=(178, 44, 36), width=3)
-    # magnifier
-    d.ellipse([48, 128, 108, 188], outline=(216, 164, 65), width=6)
-    d.line([100, 180, 120, 200], fill=(216, 164, 65), width=8)
-    # US flag (small)
-    for i in range(5):
-        d.rectangle([14, 206 + i * 5, 66, 206 + i * 5 + 2],
-                    fill=(178, 34, 52) if i % 2 == 0 else (255, 255, 255))
-    d.rectangle([14, 206, 30, 220], fill=(30, 60, 120))
-    # UK flag (small, simplified)
-    d.rectangle([84, 206, 136, 232], fill=(0, 36, 125))
-    d.rectangle([84, 216, 136, 222], fill=(255, 255, 255))
-    d.rectangle([107, 206, 113, 232], fill=(255, 255, 255))
-    d.rectangle([84, 218, 136, 220], fill=(200, 16, 46))
-    d.rectangle([109, 206, 111, 232], fill=(200, 16, 46))
-
-
-def scene_court(d):
-    # courthouse with pediment and columns, gavel in front
-    d.rectangle([0, 0, 150, 240], fill=(226, 228, 230))
-    # building
-    d.rectangle([18, 92, 132, 182], fill=(250, 250, 248))
-    d.polygon([(10, 92), (75, 56), (140, 92)], fill=(188, 190, 194))
-    d.ellipse([67, 66, 83, 82], fill=(198, 140, 44))
-    for x in (28, 54, 80, 106):
-        d.rectangle([x, 100, x + 12, 168], fill=(158, 160, 164))
-    d.rectangle([14, 182, 136, 190], fill=(148, 150, 154))
-    d.rectangle([10, 190, 140, 198], fill=(138, 140, 144))
-    # gavel
-    d.rectangle([34, 206, 92, 222], fill=(122, 82, 44))
-    d.rectangle([28, 200, 46, 228], fill=(96, 62, 30))
-    d.rectangle([88, 206, 118, 216], fill=(122, 82, 44))
-    # sound block
-    d.rectangle([96, 222, 132, 232], fill=(96, 62, 30))
-
-
-SCENES = {
-    "chip": scene_chip,
-    "virus": scene_virus,
-    "plane": scene_plane,
-    "knesset": scene_knesset,
-    "spy": scene_spy,
-    "court": scene_court,
-}
-
-# ---------------------------------------------------------------- stories
-STORIES = [
-    dict(tag="TECH \u00b7 USA", color=(20, 100, 60), scene="chip",
-         head="NVIDIA BEATS ESTIMATES; HUANG NOT BACK",
-         body="Q3 revenue hits $115.8bn, double a year ago, with $130bn "
-              "guided next. The board says it will not bring back ousted "
-              "CEO Jensen Huang; interim chief Colette Kress takes over."),
-    dict(tag="HEALTH \u00b7 AMERICAS", color=(178, 44, 36), scene="virus",
-         head="US LOSES MEASLES-FREE STATUS",
-         body="After 26 years, the Pan American Health Organization strips "
-              "the US of measles elimination status. Cases pass 5,400 in "
-              "2026, the worst in 30 years; Mexico and Bolivia lose it too."),
-    dict(tag="DISASTER \u00b7 RUSSIA", color=(90, 90, 96), scene="plane",
-         head="ARMY PLANE DOWN IN SIBERIA",
-         body="An An-12 military transport crashes in the Kemerovo region. "
-              "Russia's defence ministry says all 19 aboard died; a "
-              "technical fault is the suspected cause."),
-    dict(tag="POLITICS \u00b7 ISRAEL", color=(30, 80, 170), scene="knesset",
-         head="KNESSET PICKS EISENKOT ALLY AS SPEAKER",
-         body="Matan Kahana wins 66\u201352, replacing Likud's Amir Ohana. "
-              "The vote hands Netanyahu's rivals control of parliament's "
-              "agenda as Eisenkot tries to form a government."),
-    dict(tag="ESPIONAGE \u00b7 UK / USA", color=(40, 60, 110), scene="spy",
-         head="US OFFICER IN SPY CASE HANDED OVER",
-         body="Lt Col Brandon Tyner, arrested in Britain on Nov 10 on "
-              "suspicion of spying for Russia, is transferred to US "
-              "military custody. The Kremlin denies any link."),
-    dict(tag="COURTS \u00b7 USA", color=(120, 70, 20), scene="court",
-         head="27 YEARS FOR PLOT TO KILL TRUMP",
-         body="Asif Merchant is jailed for 27\u00bd years in Brooklyn for an "
-              "Iran-linked murder-for-hire plot against Donald Trump. "
-              "Prosecutors had sought life."),
-]
-
-
-def draw_panel(img, x, y, w, h, story):
-    d = ImageDraw.Draw(img)
-    # card
-    d.rounded_rectangle([x, y, x + w, y + h], radius=10, fill=CARD,
-                        outline=BORDER, width=2)
-    # coloured side bar
-    d.rounded_rectangle([x, y, x + 7, y + h], radius=4, fill=story["color"])
-    d.rectangle([x + 3, y, x + 7, y + h], fill=story["color"])
-    # illustration tile
-    tile = Image.new("RGB", (150, 240), (255, 255, 255))
-    td = ImageDraw.Draw(tile)
-    SCENES[story["scene"]](td)
-    mask = Image.new("L", (150, 240), 0)
-    md = ImageDraw.Draw(mask)
-    md.rounded_rectangle([0, 0, 150, 240], radius=8, fill=255)
-    img.paste(tile, (x + 16, y + 16), mask)
-    # text column
-    tx = x + 178
-    tw = x + w - 14 - tx
-    f_tag = font(F_BOLD, 14)
-    f_head = font(F_BOLD, 23)
-    f_body = font(F_REG, 17)
-    cy = y + 20
-    d.text((tx, cy), story["tag"], font=f_tag, fill=story["color"])
-    cy += 25
-    for line in wrap(d, story["head"], f_head, tw):
-        d.text((tx, cy), line, font=f_head, fill=INK)
-        cy += 28
-    cy += 4
-    for line in wrap(d, story["body"], f_body, tw):
-        d.text((tx, cy), line, font=f_body, fill=BODY)
-        cy += 22
-
-
-def build():
-    img = Image.new("RGB", (W, H), PAPER)
-    d = ImageDraw.Draw(img)
-    # masthead
-    d.rectangle([0, 0, W, 104], fill=SLATE)
-    d.rectangle([0, 104, W, 108], fill=RED)
-    f_title = font(F_BOLD, 44)
-    title = "WEDNESDAY 18 NOVEMBER 2026"
-    tw = d.textlength(title, font=f_title)
-    d.text(((W - tw) / 2, 14), title, font=f_title, fill=(255, 255, 255))
-    f_sub = font(F_BOLD, 18)
-    sub = "T H E   W O R L D   I N   O N E   D A Y"
-    sw = d.textlength(sub, font=f_sub)
-    d.text(((W - sw) / 2, 68), sub, font=f_sub, fill=GOLD)
-    # grid 2 x 3
-    pw, ph, gap = 490, 272, 12
-    gx, gy = 16, 120
-    for i, story in enumerate(STORIES):
-        col, row = i % 2, i // 2
-        draw_panel(img, gx + col * (pw + gap), gy + row * (ph + gap),
-                   pw, ph, story)
-    # footer
-    f_foot = font(F_REG, 15)
-    foot = ("Sources: Reuters \u00b7 AP \u00b7 AFP \u00b7 CNN \u00b7 Al Jazeera"
-            "  \u2014  18 November 2026")
-    fw = d.textlength(foot, font=f_foot)
-    d.text(((W - fw) / 2, 986), foot, font=f_foot, fill=MUTED)
-    return img
+def save_poster(path):
+    build_poster().save(path, format="PNG", optimize=True)
 
 
 if __name__ == "__main__":
-    out = os.path.join(HERE, "entry.png")
-    img = build()
-    img.save(out, "PNG", optimize=True)
-    print(out, os.path.getsize(out), "bytes", img.size)
+    import sys
+    save_poster(sys.argv[1] if len(sys.argv) > 1 else "entry.png")
