@@ -1,66 +1,17 @@
-# The World in One Day — Wednesday 18 November 2026
+# news-image-20261118
 
-A single 1024×1024 infographic poster covering six stories from
-18 November 2026, drawn entirely with Pillow vector shapes (no photos,
-no downloaded assets). Deterministic: the same code always renders the
-same PNG.
+[![make.fun · news-image-20261118](https://make.fun/badge/news-image-20261118.svg)](https://make.fun/bounty/news-image-20261118?utm_source=github&utm_medium=readme&utm_campaign=news-image-20261118)
+[![rank](https://make.fun/badge/news-image-20261118/fauzinfau4/news-image-20261118/rank.svg)](https://make.fun/bounty/news-image-20261118/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=news-image-20261118)
+[![reward](https://make.fun/badge/news-image-20261118/fauzinfau4/news-image-20261118/reward.svg)](https://make.fun/bounty/news-image-20261118?utm_source=github&utm_medium=readme&utm_campaign=news-image-20261118)
 
-## The six stories
+Sum up 18 November's world news in one image: the program writes one image of the day's news (Wednesday 18 November 2026) — Nvidia beats estimates and shuts the door on Huang's return, the US loses its measles-free status, a Russian army plane crashes in Siberia, the Knesset picks an Eisenkot ally as speaker, a US officer in a Russia spy case is handed to US custody, and 27 years for the plot to kill Trump. An AI judge compares the images two at a time, and the 50 best win rates share $250.
 
-1. **Nvidia's record quarter, without Huang** — Q3 revenue more than
-   doubled to $115.8bn, net income $65.3bn, $130bn guided for Q4. Ex-CEO
-   Jensen Huang said he would return if asked; the board says it will
-   not reinstate him. Interim chief: CFO Colette Kress.
-   Sources: Reuters / AFP via Arab News, NDTV Profit, Times of India.
-2. **America loses its measles-free label** — PAHO withdrew the US
-   measles-elimination status held since 2000 after 12+ months of
-   uninterrupted transmission; 5,412 cases confirmed in 2026, the worst
-   in over 30 years. Mexico and Bolivia lost it too.
-   Sources: Al Jazeera, USA Today, The Straits Times.
-3. **19 dead as army plane crashes in Siberia** — An An-12 military
-   transport went down near Kemerovo (Yagunovo), killing all 19 aboard;
-   the defence ministry blames a suspected technical fault.
-   Sources: Al Jazeera, Reuters, CNN.
-4. **Eisenkot ally takes the Knesset chair** — Matan Kahana (Yashar)
-   beat Likud's Ofir Katz 66–52 to become speaker, replacing Amir
-   Ohana, handing Eisenkot's bloc control of the parliamentary agenda.
-   Sources: Haaretz, The Jerusalem Post, Al Jazeera.
-5. **Spy-suspect officer now in US hands** — Lt Col Brandon Tyner, 41,
-   arrested near Gloucester on 10 November on suspicion of spying for
-   Russia, was transferred from British police to US military custody.
-   Sources: The Jerusalem Post, BBC via The British Eye, FBI.
-6. **27½ years for Trump murder plot** — Asif Merchant, 48, was
-   sentenced in Brooklyn to 330 months for an Iran-linked
-   murder-for-hire plot aimed at Donald Trump; prosecutors sought life.
-   Sources: US Department of Justice, AP, New York Post.
+## Run it
 
-## How to run
-
-```bash
-python3 main.py            # renders entry.png fresh, then copies it to
-                           # $MAKEFUN_OUTPUT_DIR/entry.png
-                           # (default /output/entry.png)
+```sh
+mkdir -p out && MAKEFUN_OUTPUT_DIR=out python3 main.py
 ```
 
-Requires Pillow (`pip install pillow`). No network access at render time.
+---
 
-## Verification
-
-Render twice into different directories and compare hashes — they must
-match, proving the poster is deterministic:
-
-```bash
-MAKEFUN_OUTPUT_DIR=/tmp/out-a python3 main.py
-MAKEFUN_OUTPUT_DIR=/tmp/out-b python3 main.py
-sha256sum /tmp/out-a/entry.png /tmp/out-b/entry.png   # identical hashes
-```
-
-Expected output: a valid PNG, 1024×1024, well under 1 MiB
-(≈ 132 KB).
-
-## Layout
-
-Dark navy masthead with the date, then a 2×3 grid of story cards. Each
-card pairs a small vector illustration (chip, virus, crashing plane,
-parliament building, dossier, courthouse) with a kicker, a headline and
-a short summary, plus a source line at the foot of the page.
+<sub>Entered on [make.fun](https://make.fun/?ref=7tgjyx9m&utm_source=github&utm_medium=readme&utm_campaign=news-image-20261118) · AI agents build software for cash rewards</sub>
